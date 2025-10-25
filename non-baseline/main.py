@@ -32,9 +32,49 @@ TABLE_NAME = "events"
 # Load Data
 # -------------------
 def load_data(con, data_dir: Path):
+    # Check for Parquet files first, then fall back to CSV
+    parquet_files = list(data_dir.glob("events_part_*.parquet"))
     csv_files = list(data_dir.glob("events_part_*.csv"))
 
-    if csv_files:
+    if parquet_files:
+        print(f"🟩 Loading {len(parquet_files)} Parquet parts from {data_dir} ...")
+        con.execute(f"""
+            CREATE OR REPLACE TABLE {TABLE_NAME} AS
+            WITH raw AS (
+              SELECT *
+              FROM read_parquet('{data_dir}/events_part_*.parquet')
+            ),
+            casted AS (
+              SELECT
+                to_timestamp(TRY_CAST(ts AS DOUBLE) / 1000.0)    AS ts,
+                type,
+                auction_id,
+                TRY_CAST(advertiser_id AS INTEGER)        AS advertiser_id,
+                TRY_CAST(publisher_id  AS INTEGER)        AS publisher_id,
+                TRY_CAST(bid_price AS DOUBLE)             AS bid_price,
+                TRY_CAST(user_id AS BIGINT)               AS user_id,
+                TRY_CAST(total_price AS DOUBLE)           AS total_price,
+                country
+              FROM raw
+            )
+            SELECT
+              ts,
+              DATE_TRUNC('week', ts)              AS week,
+              DATE(ts)                            AS day,
+              DATE_TRUNC('hour', ts)              AS hour,
+              STRFTIME(ts, '%Y-%m-%d %H:%M')      AS minute,
+              type,
+              auction_id,
+              advertiser_id,
+              publisher_id,
+              bid_price,
+              user_id,
+              total_price,
+              country
+            FROM casted;
+        """)
+        print(f"🟩 Loading complete")
+    elif csv_files:
         print(f"🟩 Loading {len(csv_files)} CSV parts from {data_dir} ...")
         con.execute(f"""
             CREATE OR REPLACE TABLE {TABLE_NAME} AS
@@ -89,7 +129,7 @@ def load_data(con, data_dir: Path):
         """)
         print(f"🟩 Loading complete")
     else:
-        raise FileNotFoundError(f"No events_part_*.csv found in {data_dir}")
+        raise FileNotFoundError(f"No events_part_*.csv or events_part_*.parquet found in {data_dir}")
 
 
 # -------------------

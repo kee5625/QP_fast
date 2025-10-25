@@ -6,6 +6,7 @@ baseline/tmp
 
 data
 outputs
+data_parquet
 
 baseline.zip
 data.zip
