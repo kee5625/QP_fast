@@ -154,11 +154,11 @@ def main():
     args = parser.parse_args()
     
     print("=" * 60)
-    print("🧠 ADAPTIVE QUERY OPTIMIZER")
+    print(" QUERY OPTIMIZER")
     print("=" * 60)
     
     # Phase 1: Analyze queries
-    print("\n📊 Phase 1: Analyzing Queries")
+    print("\n Phase 1: Analyzing Queries")
     print("-" * 60)
     
     optimizer = AdaptiveOptimizer(queries)
@@ -170,7 +170,7 @@ def main():
         print(f"     - {spec['table_name']} (Q{spec['query_num']})")
     
     # Phase 2: Build optimized database
-    print("\n📊 Phase 2: Building Optimized Database")
+    print("\n Phase 2: Building Optimized Database")
     print("-" * 60)
     
     # Ensure parent directory exists
@@ -178,7 +178,7 @@ def main():
     
     # Remove existing database
     if args.db_path.exists():
-        print(f"   🗑️  Removing existing database")
+        print("Removing existing database...")
         args.db_path.unlink()
     
     con = duckdb.connect(str(args.db_path))
@@ -197,13 +197,13 @@ def main():
         con.execute(sql)
         elapsed = time.time() - start
         
-        row_count = con.execute(f"SELECT COUNT(*) FROM {spec['table_name']}").fetchone()[0]
-        print(f"     ✅ {row_count:,} rows in {elapsed:.2f}s")
+        row_count = con.execute(f" SELECT COUNT(*) FROM {spec['table_name']}").fetchone()[0]
+        print(f"{row_count:,} rows in {elapsed:.2f}s")
     
     con.close()
     
     # Phase 3: Execute queries
-    print("\n📊 Phase 3: Executing Queries")
+    print("\n Phase 3: Executing Queries")
     print("-" * 60)
     
     # Ensure output directory exists
