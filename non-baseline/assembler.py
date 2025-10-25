@@ -44,12 +44,7 @@ def _select_to_sql(select):
             parts.append(item)
         elif isinstance(item, dict):
             for func, col in item.items():
-                if func == "AVG_FROM_SUM":
-                    # Special case: compute AVG from pre-aggregated SUM and COUNT
-                    sum_col, count_col = col
-                    parts.append(f"({sum_col} / {count_col}) AS avg_value")
-                else:
-                    parts.append(f"{func.upper()}({col})")
+                parts.append(f"{func.upper()}({col})")
     return ", ".join(parts)
 
 

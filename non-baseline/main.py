@@ -29,69 +29,6 @@ TABLE_NAME = "events"
 
 
 # -------------------
-# Build Pre-Aggregated Cubes
-# -------------------
-def build_cubes(con):
-    """
-    Create indexed pre-aggregated tables (cubes) for faster query execution.
-    """
-    
-    # Cube 1: Impression bid prices by minute, day, country, publisher
-    # Supports q1, q2, q5
-    print("  → Creating cube: impression_bid_cube")
-    con.execute("""
-        CREATE OR REPLACE TABLE impression_bid_cube AS
-        SELECT 
-            minute,
-            day,
-            country,
-            publisher_id,
-            SUM(bid_price) AS sum_bid_price,
-            COUNT(*) AS event_count
-        FROM events
-        WHERE type = 'impression' AND bid_price IS NOT NULL
-        GROUP BY minute, day, country, publisher_id;
-    """)
-    
-    # Create indexes on filter columns for faster lookups
-    con.execute("CREATE INDEX idx_imp_day ON impression_bid_cube(day);")
-    con.execute("CREATE INDEX idx_imp_country ON impression_bid_cube(country);")
-    con.execute("CREATE INDEX idx_imp_publisher ON impression_bid_cube(publisher_id);")
-    con.execute("CREATE INDEX idx_imp_day_country ON impression_bid_cube(day, country);")
-    
-    # Cube 2: Purchase total prices by country
-    # Supports q3
-    print("  → Creating cube: purchase_price_cube")
-    con.execute("""
-        CREATE OR REPLACE TABLE purchase_price_cube AS
-        SELECT 
-            country,
-            SUM(total_price) AS sum_total_price,
-            COUNT(*) AS purchase_count
-        FROM events
-        WHERE type = 'purchase' AND total_price IS NOT NULL
-        GROUP BY country;
-    """)
-    
-    con.execute("CREATE INDEX idx_purch_country ON purchase_price_cube(country);")
-    
-    # Cube 3: Event counts by advertiser and type
-    # Supports q4
-    print("  → Creating cube: advertiser_type_cube")
-    con.execute("""
-        CREATE OR REPLACE TABLE advertiser_type_cube AS
-        SELECT 
-            advertiser_id,
-            type,
-            COUNT(*) AS event_count
-        FROM events
-        GROUP BY advertiser_id, type;
-    """)
-    
-    con.execute("CREATE INDEX idx_adv_type ON advertiser_type_cube(advertiser_id, type);")
-
-
-# -------------------
 # Load Data
 # -------------------
 def load_data(con, data_dir: Path):
@@ -150,12 +87,7 @@ def load_data(con, data_dir: Path):
               country
             FROM casted;
         """)
-        print("🟩 Loading complete")
-        
-        # Create pre-aggregated cubes with indexes
-        print("🟦 Building pre-aggregated cubes...")
-        build_cubes(con)
-        print("🟩 Cubes built successfully")
+        print(f"🟩 Loading complete")
     else:
         raise FileNotFoundError(f"No events_part_*.csv found in {data_dir}")
 
