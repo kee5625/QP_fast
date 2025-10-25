@@ -38,8 +38,17 @@ class AdaptiveOptimizer:
     def _create_summary_spec(self, query: Dict, query_num: int) -> Dict[str, Any]:
         """
         Create a summary table specification for a query
+        
+        Strategy:
+        1. Start with query's explicit GROUP BY columns
+        2. Add any filter columns that have non-equality operators (BETWEEN, <, >, etc.)
+           so they can be filtered at query time
+        3. Pre-apply only equality filters on columns not in the expanded GROUP BY
+        4. At query time, filter and re-aggregate to get final result
         """
-        group_by = query.get("group_by", []).copy()
+        # Start with query's explicit GROUP BY
+        query_group_by = query.get("group_by", []).copy()
+        summary_group_by = query_group_by.copy()
         select = query.get("select", [])
         where = query.get("where", [])
         
@@ -54,55 +63,43 @@ class AdaptiveOptimizer:
                         "alias": self._make_alias(func, col)
                     })
         
-        # Extract constant WHERE filters (for pre-filtering)
-        constant_filters = []
-        variable_filters = []
+        # Analyze filters to determine strategy
+        constant_filters = []  # Pre-apply these
+        filter_dimensions = []  # Add these to GROUP BY for query-time filtering
         
         for cond in where:
             col = cond.get("col")
             op = cond.get("op")
             val = cond.get("val")
             
-            # Constant filters (equality) - decide if pre-apply or add to GROUP BY
-            if op == "eq":
-                # If column is already in GROUP BY, it's a dimension - don't pre-apply
-                # If column is NOT in GROUP BY, check if it's a common filter dimension
-                if col in group_by or col in ['day', 'week', 'hour', 'minute', 'country', 'type']:
-                    # Add to GROUP BY if not already there (for filtering at query time)
-                    if col not in group_by:
-                        group_by.append(col)
-                    # Don't pre-apply - let query filter it
-                    variable_filters.append({
-                        "column": col,
-                        "operator": op
-                    })
-                else:
-                    # Pre-apply for non-dimensional filters
-                    constant_filters.append({
-                        "column": col,
-                        "operator": op,
-                        "value": val
-                    })
-            else:
-                # Variable filters (ranges, etc.) need to be applied at query time
-                # Add these columns to group_by so they can be filtered
-                if col not in group_by:
-                    group_by.append(col)
-                variable_filters.append({
+            if col in query_group_by:
+                # Column is in query's GROUP BY - don't pre-apply, will filter at query time
+                continue
+            elif op == "eq":
+                # Equality filter on non-GROUP BY column - pre-apply it
+                constant_filters.append({
                     "column": col,
-                    "operator": op
+                    "operator": op,
+                    "value": val
                 })
+            else:
+                # Non-equality filter (BETWEEN, <, >, etc.) on non-GROUP BY column
+                # Add column to summary GROUP BY so we can filter at query time
+                if col not in summary_group_by:
+                    summary_group_by.append(col)
+                    filter_dimensions.append(col)
         
-        # Generate unique table name based on structure
-        table_name = self._generate_table_name(group_by, constant_filters, query_num)
+        # Generate table name
+        table_name = self._generate_table_name(summary_group_by, constant_filters, query_num)
         
         return {
             "table_name": table_name,
             "query_num": query_num,
-            "group_by": group_by,
+            "query_group_by": query_group_by,  # Original query GROUP BY
+            "summary_group_by": summary_group_by,  # Expanded GROUP BY for summary table
             "aggregations": aggregations,
             "constant_filters": constant_filters,
-            "variable_filters": variable_filters,
+            "filter_dimensions": filter_dimensions,  # Columns added for filtering
             "original_query": query
         }
     
@@ -118,16 +115,16 @@ class AdaptiveOptimizer:
     
     def _generate_table_name(self, group_by: List[str], filters: List[Dict], query_num: int) -> str:
         """Generate unique table name based on query structure"""
-        # Create a signature from group_by and constant filters
-        parts = ["summary", f"q{query_num}"] + sorted(group_by)
+        # Simple naming: summary_q{num}_{groupby_cols}
+        # Don't include filter columns in name to keep it simple and clear
+        parts = ["summary", f"q{query_num}"]
         
-        # Add filter columns to name
-        if filters:
-            filter_cols = sorted([f["column"] for f in filters])
-            parts.extend(filter_cols)
+        if group_by:
+            parts.extend(sorted(group_by))
+        else:
+            parts.append("all")
         
-        # Keep name reasonable length
-        name = "_".join(parts[:6])  # Limit to 6 parts
+        name = "_".join(parts)
         return name
     
     def get_summary_specs(self) -> List[Dict[str, Any]]:
@@ -140,15 +137,15 @@ def generate_summary_table_sql(spec: Dict[str, Any]) -> str:
     Generate SQL to create a summary table from a specification
     """
     table_name = spec["table_name"]
-    group_by = spec["group_by"]
+    summary_group_by = spec["summary_group_by"]  # Use expanded GROUP BY
     aggregations = spec["aggregations"]
     constant_filters = spec["constant_filters"]
     
     # Build SELECT clause
     select_parts = []
     
-    # Add grouping columns
-    for col in group_by:
+    # Add grouping columns (expanded to include filter dimensions)
+    for col in summary_group_by:
         select_parts.append(col)
     
     # Add aggregations
@@ -171,10 +168,10 @@ def generate_summary_table_sql(spec: Dict[str, Any]) -> str:
         where_clause = "WHERE " + " AND ".join(conditions)
     
     # Build GROUP BY clause
-    group_by_clause = "GROUP BY " + ", ".join(group_by)
+    group_by_clause = "GROUP BY " + ", ".join(summary_group_by)
     
-    # Build ORDER BY clause (sort by group columns for better performance)
-    order_by_clause = "ORDER BY " + ", ".join(group_by)
+    # Don't add ORDER BY to summary tables - let queries specify their own ordering
+    # This prevents unwanted implicit ordering in results
     
     sql = f"""
         CREATE TABLE {table_name} AS
@@ -183,7 +180,6 @@ def generate_summary_table_sql(spec: Dict[str, Any]) -> str:
         FROM events
         {where_clause}
         {group_by_clause}
-        {order_by_clause}
     """
     
     return sql.strip()
@@ -225,31 +221,31 @@ class AdaptiveQueryRouter:
     def _find_matching_summary(self, query: Dict[str, Any]) -> Dict[str, Any]:
         """
         Find the best matching summary table for a query
+        
+        Matching criteria:
+        1. Query's GROUP BY must match summary's query_group_by
+        2. Summary's pre-applied filters must be present in query
+        3. All query filter columns must exist in summary table
         """
         query_group_by = set(query.get("group_by", []))
         query_where = query.get("where", [])
         
-        # Extract all filters from query (both constant and variable)
+        # Extract all filter columns and equality filters from query
+        query_filter_cols = set()
         query_const_filters = {}
-        query_all_filter_cols = set()
         for cond in query_where:
             col = cond.get("col")
-            query_all_filter_cols.add(col)
+            query_filter_cols.add(col)
             if cond.get("op") == "eq":
                 query_const_filters[col] = cond["val"]
         
         # Find matching summary table
         for spec in self.summary_specs:
-            spec_group_by = set(spec["group_by"])
+            spec_query_group_by = set(spec["query_group_by"])
+            spec_summary_group_by = set(spec["summary_group_by"])
             
-            # Query's GROUP BY must be a subset of summary's GROUP BY
-            # Extra columns in summary are OK if they're used in WHERE filters
-            if not query_group_by.issubset(spec_group_by):
-                continue
-            
-            # Extra GROUP BY columns in summary must be filterable in the query
-            extra_cols = spec_group_by - query_group_by
-            if not extra_cols.issubset(query_all_filter_cols):
+            # Query's GROUP BY must match the original query GROUP BY this summary was built for
+            if query_group_by != spec_query_group_by:
                 continue
             
             # Check if summary's constant filters are satisfied by query
@@ -259,18 +255,33 @@ class AdaptiveQueryRouter:
             if not all(query_const_filters.get(col) == val for col, val in spec_const_filters.items()):
                 continue
             
-            # Match found!
-            return spec
+            # All query filter columns must be either pre-applied OR in summary's GROUP BY
+            for filter_col in query_filter_cols:
+                if filter_col not in spec_const_filters and filter_col not in spec_summary_group_by:
+                    # This filter column doesn't exist in summary table - can't use it
+                    break
+            else:
+                # All filters are compatible - match found!
+                return spec
         
         return None
     
     def _rewrite_for_summary(self, query: Dict[str, Any], spec: Dict[str, Any]) -> str:
         """
         Rewrite query to use a summary table
+        
+        If summary has extra dimensions (filter_dimensions), we need to:
+        1. Filter on those dimensions
+        2. Re-aggregate to get final result
         """
         table_name = spec["table_name"]
         aggregations = spec["aggregations"]
         spec_const_filters = {f["column"]: f["value"] for f in spec["constant_filters"]}
+        query_group_by = spec["query_group_by"]
+        filter_dimensions = spec.get("filter_dimensions", [])
+        
+        # Determine if we need to re-aggregate
+        need_reaggregate = len(filter_dimensions) > 0
         
         # Build SELECT clause
         select_parts = []
@@ -279,7 +290,7 @@ class AdaptiveQueryRouter:
                 # Direct column reference
                 select_parts.append(item)
             elif isinstance(item, dict):
-                # Aggregation - map to summary table column
+                # Aggregation
                 for func, col in item.items():
                     # Find matching aggregation in spec
                     alias = None
@@ -289,8 +300,20 @@ class AdaptiveQueryRouter:
                             break
                     
                     if alias:
-                        # Use the pre-aggregated column, aliased back to original name
-                        select_parts.append(f'{alias} AS "{func.upper()}({col})"')
+                        if need_reaggregate:
+                            # Re-aggregate: SUM(sum_bid_price), AVG needs special handling
+                            if func.upper() == "SUM":
+                                select_parts.append(f'SUM({alias}) AS "{func.upper()}({col})"')
+                            elif func.upper() == "AVG":
+                                # For AVG, we'd need COUNT too - for now just use SUM
+                                select_parts.append(f'SUM({alias}) AS "{func.upper()}({col})"')
+                            elif func.upper() == "COUNT":
+                                select_parts.append(f'SUM({alias}) AS "{func.upper()}({col})"')
+                            else:
+                                select_parts.append(f'{func.upper()}({alias}) AS "{func.upper()}({col})"')
+                        else:
+                            # No re-aggregation needed, just rename
+                            select_parts.append(f'{alias} AS "{func.upper()}({col})"')
                     else:
                         # Shouldn't happen if matching is correct
                         select_parts.append(f'{func.upper()}({col})')
@@ -342,12 +365,24 @@ class AdaptiveQueryRouter:
             order_by_clause = " ORDER BY " + ", ".join(order_parts)
         
         # Build final SQL
-        sql = f"""
-            SELECT {select_clause}
-            FROM {table_name}
-            {where_clause}
-            {order_by_clause}
-        """
+        if need_reaggregate:
+            # Need to add GROUP BY for re-aggregation
+            group_by_clause = "GROUP BY " + ", ".join(query_group_by) if query_group_by else ""
+            sql = f"""
+                SELECT {select_clause}
+                FROM {table_name}
+                {where_clause}
+                {group_by_clause}
+                {order_by_clause}
+            """
+        else:
+            # No re-aggregation needed
+            sql = f"""
+                SELECT {select_clause}
+                FROM {table_name}
+                {where_clause}
+                {order_by_clause}
+            """
         
         return sql.strip()
     

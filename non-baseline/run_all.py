@@ -120,8 +120,7 @@ def create_main_table(con, data_dir: Path):
               user_id,
               total_price,
               country
-            FROM casted
-            ORDER BY day, type, country, publisher_id;
+            FROM casted;
         """)
     elif csv_files:
         print(f"   Loading from {len(csv_files)} CSV files...")
@@ -174,8 +173,7 @@ def create_main_table(con, data_dir: Path):
               user_id,
               total_price,
               country
-            FROM casted
-            ORDER BY day, type, country, publisher_id;
+            FROM casted;
         """)
     else:
         raise FileNotFoundError(f"No events_part_*.parquet or *.csv found in {data_dir}")
