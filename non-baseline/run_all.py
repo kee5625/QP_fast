@@ -13,9 +13,66 @@ import time
 from pathlib import Path
 import csv
 import argparse
+import psutil
+import threading
 
 from adaptive_optimizer import AdaptiveOptimizer, AdaptiveQueryRouter, generate_summary_table_sql
 from inputs import queries
+
+
+class CPUMonitor:
+    """Monitor CPU and RAM usage in a background thread"""
+    
+    def __init__(self, interval=0.1):
+        self.interval = interval
+        self.cpu_samples = []
+        self.ram_samples = []
+        self.running = False
+        self.thread = None
+    
+    def start(self):
+        """Start monitoring CPU and RAM usage"""
+        self.running = True
+        self.cpu_samples = []
+        self.ram_samples = []
+        self.thread = threading.Thread(target=self._monitor, daemon=True)
+        self.thread.start()
+    
+    def stop(self):
+        """Stop monitoring and return statistics"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=1.0)
+        
+        if not self.cpu_samples:
+            return {
+                "cpu_min": 0, "cpu_max": 0, "cpu_avg": 0,
+                "ram_min_gb": 0, "ram_max_gb": 0, "ram_avg_gb": 0,
+                "samples": 0
+            }
+        
+        return {
+            "cpu_min": min(self.cpu_samples),
+            "cpu_max": max(self.cpu_samples),
+            "cpu_avg": sum(self.cpu_samples) / len(self.cpu_samples),
+            "ram_min_gb": min(self.ram_samples),
+            "ram_max_gb": max(self.ram_samples),
+            "ram_avg_gb": sum(self.ram_samples) / len(self.ram_samples),
+            "samples": len(self.cpu_samples)
+        }
+    
+    def _monitor(self):
+        """Background thread that samples CPU and RAM usage"""
+        process = psutil.Process()
+        while self.running:
+            try:
+                cpu_percent = process.cpu_percent(interval=self.interval)
+                ram_gb = process.memory_info().rss / (1024 ** 3)  # Convert to GB
+                self.cpu_samples.append(cpu_percent)
+                self.ram_samples.append(ram_gb)
+            except Exception:
+                pass
+            time.sleep(self.interval)
 
 
 def create_main_table(con, data_dir: Path):
@@ -153,25 +210,39 @@ def main():
     
     args = parser.parse_args()
     
+    # Initialize CPU monitor
+    cpu_monitor = CPUMonitor(interval=0.1)
+    cpu_monitor.start()
+    
     print("=" * 60)
     print(" QUERY OPTIMIZER")
     print("=" * 60)
+    print(f"   PID: {psutil.Process().pid}")
+    print(f"   CPU cores: {psutil.cpu_count()}")
     
     # Phase 1: Analyze queries
     print("\n Phase 1: Analyzing Queries")
     print("-" * 60)
+    phase1_start = time.time()
     
     optimizer = AdaptiveOptimizer(queries)
     summary_specs = optimizer.analyze_queries()
+    
+    phase1_time = time.time() - phase1_start
+    phase1_cpu = cpu_monitor.stop()
     
     print(f"   Analyzed {len(queries)} queries")
     print(f"   Identified {len(summary_specs)} summary tables to create:")
     for spec in summary_specs:
         print(f"     - {spec['table_name']} (Q{spec['query_num']})")
+    print(f"   Phase 1 CPU: avg={phase1_cpu['cpu_avg']:.1f}%, max={phase1_cpu['cpu_max']:.1f}%")
+    print(f"   Phase 1 RAM: avg={phase1_cpu['ram_avg_gb']:.2f}GB, max={phase1_cpu['ram_max_gb']:.2f}GB")
     
     # Phase 2: Build optimized database
     print("\n Phase 2: Building Optimized Database")
     print("-" * 60)
+    phase2_start = time.time()
+    cpu_monitor.start()
     
     # Ensure parent directory exists
     args.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -202,9 +273,16 @@ def main():
     
     con.close()
     
+    phase2_time = time.time() - phase2_start
+    phase2_cpu = cpu_monitor.stop()
+    print(f"\n   Phase 2 CPU: avg={phase2_cpu['cpu_avg']:.1f}%, max={phase2_cpu['cpu_max']:.1f}%")
+    print(f"   Phase 2 RAM: avg={phase2_cpu['ram_avg_gb']:.2f}GB, max={phase2_cpu['ram_max_gb']:.2f}GB")
+    
     # Phase 3: Execute queries
     print("\n Phase 3: Executing Queries")
     print("-" * 60)
+    phase3_start = time.time()
+    cpu_monitor.start()
     
     # Ensure output directory exists
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -247,6 +325,8 @@ def main():
         })
     
     total_time = time.time() - total_start
+    phase3_time = time.time() - phase3_start
+    phase3_cpu = cpu_monitor.stop()
     
     con.close()
     
@@ -258,9 +338,38 @@ def main():
     
     # Router stats
     stats = router.get_stats()
-    print(f"\n🎯 Adaptive Router Stats:")
+    print("\n🎯 Adaptive Router Stats:")
     print(f"   Summary table hits: {stats['summary_table_hits']}/{stats['total_queries']}")
     print(f"   Hit rate: {stats['hit_rate_percent']:.1f}%")
+    
+    # Resource usage summary
+    print("\n📊 Resource Usage Summary:")
+    print("\n   CPU Usage:")
+    print(f"     Phase 1 (Analysis):  avg={phase1_cpu['cpu_avg']:.1f}%, max={phase1_cpu['cpu_max']:.1f}%, time={phase1_time:.2f}s")
+    print(f"     Phase 2 (Build DB):  avg={phase2_cpu['cpu_avg']:.1f}%, max={phase2_cpu['cpu_max']:.1f}%, time={phase2_time:.2f}s")
+    print(f"     Phase 3 (Queries):   avg={phase3_cpu['cpu_avg']:.1f}%, max={phase3_cpu['cpu_max']:.1f}%, time={phase3_time:.2f}s")
+    
+    print("\n   RAM Usage:")
+    print(f"     Phase 1 (Analysis):  avg={phase1_cpu['ram_avg_gb']:.2f}GB, max={phase1_cpu['ram_max_gb']:.2f}GB")
+    print(f"     Phase 2 (Build DB):  avg={phase2_cpu['ram_avg_gb']:.2f}GB, max={phase2_cpu['ram_max_gb']:.2f}GB")
+    print(f"     Phase 3 (Queries):   avg={phase3_cpu['ram_avg_gb']:.2f}GB, max={phase3_cpu['ram_max_gb']:.2f}GB")
+    
+    # Peak RAM across all phases
+    peak_ram = max(phase1_cpu['ram_max_gb'], phase2_cpu['ram_max_gb'], phase3_cpu['ram_max_gb'])
+    print(f"\n   🔴 Peak RAM Usage: {peak_ram:.2f}GB")
+    if peak_ram > 16:
+        print(f"   ⚠️  WARNING: Exceeds 16GB limit by {peak_ram - 16:.2f}GB!")
+    else:
+        print(f"   ✅ Within 16GB limit ({16 - peak_ram:.2f}GB headroom)")
+    
+    # Disk usage
+    if args.db_path.exists():
+        db_size_gb = args.db_path.stat().st_size / (1024 ** 3)
+        print(f"\n   💾 Database Size: {db_size_gb:.2f}GB")
+        if db_size_gb > 100:
+            print(f"   ⚠️  WARNING: Exceeds 100GB limit by {db_size_gb - 100:.2f}GB!")
+        else:
+            print(f"   ✅ Within 100GB limit ({100 - db_size_gb:.2f}GB headroom)")
     
     print("\n" + "=" * 60)
     print("✅ DONE!")
