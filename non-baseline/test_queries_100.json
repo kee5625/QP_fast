@@ -1,5 +1,230 @@
 [
   {
+    "select": ["day", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}],
+    "group_by": ["day"]
+  },
+  {
+    "select": ["publisher_id", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}],
+    "group_by": ["publisher_id"]
+  },
+  {
+    "select": ["country", {"AVG": "total_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "purchase"}],
+    "group_by": ["country"]
+  },
+  {
+    "select": ["advertiser_id", "type", {"COUNT": "*"}],
+    "from": "events",
+    "group_by": ["advertiser_id", "type"]
+  },
+  {
+    "select": ["minute", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}],
+    "group_by": ["minute"]
+  },
+  {
+    "select": ["type"],
+    "from": "events",
+    "where": [{"col": "country", "op": "eq", "val": "US"}]
+  },
+  {
+    "select": ["advertiser_id"],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "serve"}]
+  },
+  {
+    "select": ["publisher_id"],
+    "from": "events",
+    "where": [{"col": "bid_price", "op": "gt", "val": "0"}]
+  },
+  {
+    "select": ["country"],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "purchase"}]
+  },
+  {
+    "select": ["user_id"],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}]
+  },
+  {
+    "select": ["day", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "impression"},
+      {"col": "country", "op": "eq", "val": "JP"}
+    ],
+    "group_by": ["day"]
+  },
+  {
+    "select": ["publisher_id", {"COUNT": "*"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "serve"},
+      {"col": "country", "op": "eq", "val": "US"}
+    ],
+    "group_by": ["publisher_id"]
+  },
+  {
+    "select": ["advertiser_id", {"AVG": "bid_price"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "impression"},
+      {"col": "country", "op": "eq", "val": "KR"}
+    ],
+    "group_by": ["advertiser_id"]
+  },
+  {
+    "select": ["country", {"SUM": "total_price"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "purchase"},
+      {"col": "advertiser_id", "op": "eq", "val": "100"}
+    ],
+    "group_by": ["country"]
+  },
+  {
+    "select": ["minute", {"COUNT": "*"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "serve"},
+      {"col": "publisher_id", "op": "eq", "val": "500"}
+    ],
+    "group_by": ["minute"]
+  },
+  {
+    "select": ["day", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "day", "op": "between", "val": ["2024-01-01", "2024-01-31"]}],
+    "group_by": ["day"]
+  },
+  {
+    "select": ["publisher_id", {"COUNT": "*"}],
+    "from": "events",
+    "where": [{"col": "day", "op": "between", "val": ["2024-06-01", "2024-06-30"]}],
+    "group_by": ["publisher_id"]
+  },
+  {
+    "select": ["country", {"AVG": "total_price"}],
+    "from": "events",
+    "where": [{"col": "day", "op": "between", "val": ["2024-10-01", "2024-10-31"]}],
+    "group_by": ["country"]
+  },
+  {
+    "select": ["advertiser_id", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "day", "op": "between", "val": ["2024-03-15", "2024-03-20"]}],
+    "group_by": ["advertiser_id"]
+  },
+  {
+    "select": ["type", {"COUNT": "*"}],
+    "from": "events",
+    "where": [{"col": "day", "op": "between", "val": ["2024-12-01", "2024-12-31"]}],
+    "group_by": ["type"]
+  },
+  {
+    "select": ["day", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "impression"},
+      {"col": "country", "op": "eq", "val": "JP"},
+      {"col": "day", "op": "between", "val": ["2024-10-20", "2024-10-23"]}
+    ],
+    "group_by": ["day"]
+  },
+  {
+    "select": ["publisher_id", {"COUNT": "*"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "serve"},
+      {"col": "country", "op": "eq", "val": "US"},
+      {"col": "day", "op": "between", "val": ["2024-06-01", "2024-06-30"]}
+    ],
+    "group_by": ["publisher_id"]
+  },
+  {
+    "select": ["advertiser_id", {"AVG": "bid_price"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "impression"},
+      {"col": "country", "op": "eq", "val": "KR"},
+      {"col": "day", "op": "between", "val": ["2024-03-01", "2024-03-31"]}
+    ],
+    "group_by": ["advertiser_id"]
+  },
+  {
+    "select": ["country", {"SUM": "total_price"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "purchase"},
+      {"col": "advertiser_id", "op": "eq", "val": "200"},
+      {"col": "day", "op": "between", "val": ["2024-07-01", "2024-07-31"]}
+    ],
+    "group_by": ["country"]
+  },
+  {
+    "select": ["minute", {"COUNT": "*"}],
+    "from": "events",
+    "where": [
+      {"col": "type", "op": "eq", "val": "serve"},
+      {"col": "publisher_id", "op": "eq", "val": "300"},
+      {"col": "day", "op": "between", "val": ["2024-09-01", "2024-09-30"]}
+    ],
+    "group_by": ["minute"]
+  },
+  {
+    "select": ["country", {"AVG": "total_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "purchase"}],
+    "group_by": ["country"],
+    "order_by": [{"col": "AVG(total_price)", "dir": "desc"}]
+  },
+  {
+    "select": ["advertiser_id", "type", {"COUNT": "*"}],
+    "from": "events",
+    "group_by": ["advertiser_id", "type"],
+    "order_by": [{"col": "COUNT(*)", "dir": "desc"}]
+  },
+  {
+    "select": ["minute", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}],
+    "group_by": ["minute"],
+    "order_by": [{"col": "minute", "dir": "asc"}]
+  },
+  {
+    "select": ["publisher_id", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}],
+    "group_by": ["publisher_id"],
+    "order_by": [{"col": "SUM(bid_price)", "dir": "desc"}]
+  },
+  {
+    "select": ["country", {"COUNT": "*"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "serve"}],
+    "group_by": ["country"],
+    "order_by": [{"col": "COUNT(*)", "dir": "asc"}]
+  },
+  {
+    "select": ["advertiser_id", "country", {"COUNT": "*"}],
+    "from": "events",
+    "where": [{"col": "type", "op": "eq", "val": "impression"}],
+    "group_by": ["advertiser_id", "country"]
+  },
+  {
+    "select": ["publisher_id", "type", {"SUM": "bid_price"}],
+    "from": "events",
+    "where": [{"col": "country", "op": "eq", "val": "US"}],
+    "group_by": ["publisher_id", "type"]
+  },
+  {
     "select": ["day", "country", {"AVG": "total_price"}],
     "from": "events",
     "where": [{"col": "type", "op": "eq", "val": "purchase"}],

@@ -18,23 +18,28 @@ class AdaptiveOptimizer:
     def analyze_queries(self) -> List[Dict[str, Any]]:
         """
         Analyze all queries and determine optimal summary tables
+        Uses intelligent merging to combine queries with identical GROUP BY + filters
         
         Returns:
             List of summary table specifications
         """
-        self.summary_specs = []
+        # First pass: collect all query specs
+        temp_specs = []
         
         for i, query in enumerate(self.queries, 1):
             # Create summary tables for queries with GROUP BY
             if query.get("group_by"):
                 spec = self._create_summary_spec(query, i)
                 if spec:
-                    self.summary_specs.append(spec)
+                    temp_specs.append(spec)
             # Create DISTINCT summary tables for non-aggregated SELECT queries
             elif self._is_simple_select(query):
                 spec = self._create_distinct_summary_spec(query, i)
                 if spec:
-                    self.summary_specs.append(spec)
+                    temp_specs.append(spec)
+        
+        # Second pass: merge specs with identical GROUP BY + filters
+        self.summary_specs = self._merge_summary_specs(temp_specs)
         
         return self.summary_specs
     
@@ -48,6 +53,7 @@ class AdaptiveOptimizer:
            so they can be filtered at query time
         3. Pre-apply only equality filters on columns not in the expanded GROUP BY
         4. At query time, filter and re-aggregate to get final result
+        5. Detect high-cardinality columns and optimize accordingly
         """
         # Start with query's explicit GROUP BY
         query_group_by = query.get("group_by", []).copy()
@@ -95,6 +101,26 @@ class AdaptiveOptimizer:
         # Generate table name
         table_name = self._generate_table_name(summary_group_by, constant_filters, query_num)
         
+        # Detect high-cardinality columns
+        high_cardinality_cols = ["user_id", "auction_id"]
+        extremely_high_card_cols = ["minute"]  # Can create 500k+ rows
+        
+        has_high_card = any(col in high_cardinality_cols for col in summary_group_by)
+        has_extreme_card = any(col in extremely_high_card_cols for col in summary_group_by)
+        
+        # Check if query has sufficient filters to limit cardinality
+        has_time_filter = any(
+            cond.get("col") in ["day", "hour", "week"] and cond.get("op") == "eq"
+            for cond in where
+        )
+        has_selective_filter = any(
+            cond.get("col") in ["country", "type", "advertiser_id", "publisher_id"]
+            for cond in where
+        )
+        
+        # Determine optimization strategy
+        needs_optimization = (has_high_card or has_extreme_card) and not (has_time_filter or has_selective_filter)
+        
         return {
             "table_name": table_name,
             "query_num": query_num,
@@ -103,7 +129,9 @@ class AdaptiveOptimizer:
             "aggregations": aggregations,
             "constant_filters": constant_filters,
             "filter_dimensions": filter_dimensions,  # Columns added for filtering
-            "original_query": query
+            "original_query": query,
+            "high_cardinality": has_high_card or has_extreme_card,
+            "needs_optimization": needs_optimization
         }
     
     def _make_alias(self, func: str, col: str) -> str:
@@ -187,6 +215,83 @@ class AdaptiveOptimizer:
         
         name = "_".join(parts)
         return name
+    
+    def _merge_summary_specs(self, specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge summary specs that have identical GROUP BY and filters
+        This prevents conflicts when multiple queries need different aggregations
+        """
+        from collections import defaultdict
+        
+        # Group specs by their signature (GROUP BY + filters)
+        signature_to_specs = defaultdict(list)
+        
+        for spec in specs:
+            # Skip DISTINCT specs - they don't need merging
+            if spec.get("type") == "distinct":
+                signature_to_specs[id(spec)].append(spec)
+                continue
+            
+            # Create signature from query_group_by and constant_filters
+            group_by = tuple(sorted(spec.get("query_group_by", [])))
+            filters = tuple(sorted(
+                (f["column"], f["value"]) 
+                for f in spec.get("constant_filters", [])
+            ))
+            filter_dims = tuple(sorted(spec.get("filter_dimensions", [])))
+            signature = (group_by, filters, filter_dims)
+            
+            signature_to_specs[signature].append(spec)
+        
+        # Merge specs with the same signature
+        merged_specs = []
+        
+        for signature, group_specs in signature_to_specs.items():
+            if len(group_specs) == 1:
+                # No merging needed
+                merged_specs.append(group_specs[0])
+            else:
+                # Merge multiple specs into one
+                merged_spec = self._merge_spec_group(group_specs)
+                merged_specs.append(merged_spec)
+        
+        return merged_specs
+    
+    def _merge_spec_group(self, specs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Merge multiple specs with identical GROUP BY + filters into one
+        Combines all aggregations from all queries
+        """
+        # Use the first spec as base
+        base_spec = specs[0].copy()
+        
+        # Collect all unique aggregations
+        all_aggregations = []
+        seen_aggs = set()
+        
+        for spec in specs:
+            for agg in spec["aggregations"]:
+                agg_key = (agg["function"], agg["column"])
+                if agg_key not in seen_aggs:
+                    all_aggregations.append(agg)
+                    seen_aggs.add(agg_key)
+        
+        # Collect all query numbers that use this summary
+        query_nums = [spec["query_num"] for spec in specs]
+        
+        # Update the merged spec
+        base_spec["aggregations"] = all_aggregations
+        base_spec["query_nums"] = query_nums  # Track all queries using this summary
+        base_spec["query_num"] = query_nums[0]  # Keep first for table naming
+        
+        # Update table name to reflect it's merged
+        if len(query_nums) > 1:
+            base_spec["table_name"] = base_spec["table_name"].replace(
+                f"_q{query_nums[0]}_", 
+                f"_q{query_nums[0]}_merged_"
+            )
+        
+        return base_spec
     
     def get_summary_specs(self) -> List[Dict[str, Any]]:
         """Return the summary table specifications"""

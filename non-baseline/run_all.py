@@ -236,8 +236,36 @@ def main():
     
     print(f"   Analyzed {len(queries)} queries")
     print(f"   Identified {len(summary_specs)} summary tables to create:")
+    
+    merged_count = 0
+    high_card_count = 0
+    
     for spec in summary_specs:
-        print(f"     - {spec['table_name']} (Q{spec['query_num']})")
+        query_nums = spec.get('query_nums', [spec['query_num']])
+        is_merged = len(query_nums) > 1
+        is_high_card = spec.get('high_cardinality', False)
+        needs_opt = spec.get('needs_optimization', False)
+        
+        if is_merged:
+            merged_count += 1
+        if is_high_card:
+            high_card_count += 1
+        
+        # Display with indicators
+        indicators = []
+        if is_merged:
+            indicators.append(f"merged Q{','.join(map(str, query_nums))}")
+        if needs_opt:
+            indicators.append("⚠️ high-cardinality")
+        
+        indicator_str = f" [{', '.join(indicators)}]" if indicators else ""
+        print(f"     - {spec['table_name']}{indicator_str}")
+    
+    if merged_count > 0:
+        print(f"   ✅ Merged {merged_count} summary tables (prevents conflicts)")
+    if high_card_count > 0:
+        print(f"   ⚠️  {high_card_count} high-cardinality tables detected")
+    
     print(f"   Phase 1 CPU: avg={phase1_cpu['cpu_avg']:.1f}%, max={phase1_cpu['cpu_max']:.1f}%")
     print(f"   Phase 1 RAM: avg={phase1_cpu['ram_avg_gb']:.2f}GB, max={phase1_cpu['ram_max_gb']:.2f}GB")
     
