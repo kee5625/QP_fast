@@ -174,7 +174,7 @@ def generate_summary_table_sql(spec: Dict[str, Any]) -> str:
     # This prevents unwanted implicit ordering in results
     
     sql = f"""
-        CREATE TABLE {table_name} AS
+        CREATE OR REPLACE TABLE {table_name} AS
         SELECT
             {select_clause}
         FROM events

@@ -205,6 +205,11 @@ def main():
         default=Path("tmp/optimized.duckdb"),
         help="Path for the optimized database (default: tmp/optimized.duckdb)"
     )
+    parser.add_argument(
+        "--skip-main-table",
+        action="store_true",
+        help="Skip creating the main events table (assumes it already exists)"
+    )
     
     args = parser.parse_args()
     
@@ -245,16 +250,27 @@ def main():
     # Ensure parent directory exists
     args.db_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Remove existing database
-    if args.db_path.exists():
-        print("Removing existing database...")
-        args.db_path.unlink()
+    # Remove existing database if not skipping main table creation
+    if not args.skip_main_table:
+        if args.db_path.exists():
+            print("Removing existing database...")
+            args.db_path.unlink()
     
     con = duckdb.connect(str(args.db_path))
     
-    # Create main table
-    print("\n   Step 1: Creating main 'events' table...")
-    create_main_table(con, args.data_dir)
+    # Create main table (or skip if flag is set)
+    if args.skip_main_table:
+        print("\n   Step 1: Skipping main table creation (using existing 'events' table)...")
+        # Verify the table exists
+        try:
+            row_count = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            print(f"   ✅ Found existing table: {row_count:,} rows")
+        except Exception as e:
+            print("   ❌ ERROR: events table not found in database!")
+            raise RuntimeError("Cannot skip main table creation - table does not exist") from e
+    else:
+        print("\n   Step 1: Creating main 'events' table...")
+        create_main_table(con, args.data_dir)
     
     # Create summary tables
     print("\n   Step 2: Creating summary tables...")
