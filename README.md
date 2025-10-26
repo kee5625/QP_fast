@@ -4,6 +4,57 @@
 
 This solution implements an **adaptive query optimization system** using DuckDB that automatically analyzes queries and builds optimal summary tables at runtime. The system achieves sub-100ms query performance through intelligent query analysis and dynamic materialization.
 
+# Performance Comparison
+
+## Execution Time Comparison
+
+| Query | Baseline (s) | Optimized (s) | Speedup |
+|-------|-------------|---------------|---------|
+| Q1    | 21.363      | 0.001         | 21,363x |
+| Q2    | 15.938      | 0.006         | 2,656x  |
+| Q3    | 15.759      | 0.005         | 3,152x  |
+| Q4    | 17.185      | 0.006         | 2,864x  |
+| Q5    | 30.802      | 0.002         | 15,401x |
+| **Total** | **101.047** | **0.032** | **3,158x** |
+
+## Visual Comparison
+
+### Baseline vs Optimized (seconds)
+```
+Q1:  ████████████████████████████████████████████ 21.363s
+     ▏ 0.001s
+
+Q2:  ████████████████████████████████ 15.938s
+     ▏ 0.006s
+
+Q3:  ████████████████████████████████ 15.759s
+     ▏ 0.005s
+
+Q4:  ██████████████████████████████████ 17.185s
+     ▏ 0.006s
+
+Q5:  ███████████████████████████████████████████████████████████ 30.802s
+     ▏ 0.002s
+
+Total: ████████████████████████████████████████████████████████████████████████████████████████████████████ 101.047s
+       ▏ 0.032s
+```
+
+### Speedup Factor
+```
+Q1:     21,363x ████████████████████████████████████████████████████████████████████████████████████████████████████
+Q2:      2,656x ████████████▌
+Q3:      3,152x ██████████████▉
+Q4:      2,864x █████████████▌
+Q5:     15,401x █████████████████████████████████████████████████████████████████████████▎
+Total:   3,158x ██████████████▉
+```
+
+## Summary
+
+The optimized implementation achieves a **3,158x speedup** overall, reducing total execution time from **101.047 seconds** to just **0.032 seconds**. The most dramatic improvement is seen in Q1 with a **21,363x speedup**.
+
+
 ## How It Works
 
 The system operates in three distinct phases to achieve optimal query performance:
