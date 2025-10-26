@@ -21,7 +21,7 @@ def create_optimized_database(data_dir: Path, db_path: Path):
     Create optimized database with main table and summary tables
     """
     print("=" * 60)
-    print("🚀 Creating Optimized DuckDB Database")
+    print("Creating Optimized DuckDB Database")
     print("=" * 60)
     
     # Ensure parent directory exists
@@ -29,21 +29,21 @@ def create_optimized_database(data_dir: Path, db_path: Path):
     
     # Remove existing database
     if db_path.exists():
-        print(f"🗑️  Removing existing database: {db_path}")
+        print(f"Removing existing database: {db_path}")
         db_path.unlink()
     
     con = duckdb.connect(str(db_path))
     
     # Step 1: Create optimized main table
-    print("\n📊 Step 1: Creating optimized main 'events' table...")
+    print("\n Step 1: Creating optimized main 'events' table...")
     create_main_table(con, data_dir)
     
     # Step 2: Create summary tables
-    print("\n📊 Step 2: Creating pre-aggregated summary tables...")
+    print("\n Step 2: Creating pre-aggregated summary tables...")
     create_summary_tables(con)
     
     # Step 3: Show statistics
-    print("\n📊 Step 3: Database statistics...")
+    print("\ Step 3: Database statistics...")
     show_statistics(con)
     
     con.close()

@@ -35,37 +35,37 @@ class QueryRouter:
         if self._is_daily_revenue_pattern(query):
             sql = self._rewrite_daily_revenue(query)
             if self.verbose:
-                print("🎯 Query Router: Using 'daily_revenue' summary table")
+                print("Query Router: Using 'daily_revenue' summary table")
         
         # Pattern 2: Publisher revenue by country and day range
         elif self._is_publisher_revenue_pattern(query):
             sql = self._rewrite_publisher_revenue(query)
             if self.verbose:
-                print("🎯 Query Router: Using 'publisher_revenue_by_country_day' summary table")
+                print("Query Router: Using 'publisher_revenue_by_country_day' summary table")
         
         # Pattern 3: Average purchase by country
         elif self._is_avg_purchase_pattern(query):
             sql = self._rewrite_avg_purchase(query)
             if self.verbose:
-                print("🎯 Query Router: Using 'avg_purchase_by_country' summary table")
+                print("Query Router: Using 'avg_purchase_by_country' summary table")
         
         # Pattern 4: Advertiser type counts
         elif self._is_advertiser_type_counts_pattern(query):
             sql = self._rewrite_advertiser_type_counts(query)
             if self.verbose:
-                print("🎯 Query Router: Using 'advertiser_type_counts' summary table")
+                print("Query Router: Using 'advertiser_type_counts' summary table")
         
         # Pattern 5: Minute-level revenue for specific day
         elif self._is_minute_revenue_pattern(query):
             sql = self._rewrite_minute_revenue(query)
             if self.verbose:
-                print("🎯 Query Router: Using 'minute_revenue_by_day' summary table")
+                print("Query Router: Using 'minute_revenue_by_day' summary table")
         
         # Fallback: Use main events table
         else:
             sql = self._fallback_to_main_table(query)
             if self.verbose:
-                print("📋 Query Router: Using main 'events' table (no matching summary)")
+                print("Query Router: Using main 'events' table (no matching summary)")
         
         if sql and sql.startswith("SELECT") and "FROM events" not in sql:
             self.summary_table_hits += 1

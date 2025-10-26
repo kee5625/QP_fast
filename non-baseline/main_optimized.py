@@ -40,8 +40,8 @@ def run(queries, db_path: Path, out_dir: Path):
     
     # Check if database exists
     if not db_path.exists():
-        print(f"❌ Error: Optimized database not found at {db_path}")
-        print(f"   Please run: python prepare_optimized_db.py --db-path {db_path}")
+        print(f"Error: Optimized database not found at {db_path}")
+        print(f"Please run: python prepare_optimized_db.py --db-path {db_path}")
         return
     
     # Connect to pre-built database

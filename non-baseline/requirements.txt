@@ -1,2 +1,4 @@
 duckdb>=0.9.0
 psutil>=5.9.0
+pandas>=2.2.0
+pyarrow>=5.0.0

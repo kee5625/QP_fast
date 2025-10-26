@@ -1,5 +1,4 @@
-baseline/venv
-non-baseline/venv
+venv
 
 non-baseline/tmp
 baseline/tmp

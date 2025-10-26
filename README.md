@@ -248,4 +248,12 @@ Then run the main script:
 python run_all.py --data-dir ../data_parquet --out-dir ../outputs
 ```
 
+For averaging, simply run:
+
+```bash
+python run_all.py --data-dir ../data_paraquet --out-dir ../outputs --skip-main-table
+```
+
+The main table created in phase 1 remains constant.
+
 This will analyze queries, build the optimized database with adaptive summary tables, execute all queries, and save results to CSV files in the `../outputs` directory.
