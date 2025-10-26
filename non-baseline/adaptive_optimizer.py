@@ -25,13 +25,16 @@ class AdaptiveOptimizer:
         self.summary_specs = []
         
         for i, query in enumerate(self.queries, 1):
-            # Only create summary tables for queries with GROUP BY
-            if not query.get("group_by"):
-                continue
-            
-            spec = self._create_summary_spec(query, i)
-            if spec:
-                self.summary_specs.append(spec)
+            # Create summary tables for queries with GROUP BY
+            if query.get("group_by"):
+                spec = self._create_summary_spec(query, i)
+                if spec:
+                    self.summary_specs.append(spec)
+            # Create DISTINCT summary tables for non-aggregated SELECT queries
+            elif self._is_simple_select(query):
+                spec = self._create_distinct_summary_spec(query, i)
+                if spec:
+                    self.summary_specs.append(spec)
         
         return self.summary_specs
     
@@ -113,6 +116,64 @@ class AdaptiveOptimizer:
             col_clean = col.replace("(", "").replace(")", "").replace("*", "star")
             return f"{func_lower}_{col_clean}"
     
+    def _is_simple_select(self, query: Dict) -> bool:
+        """Check if query is a simple SELECT without aggregations"""
+        select = query.get("select", [])
+        # Check if all select items are simple columns (no aggregations)
+        for item in select:
+            if isinstance(item, dict):
+                return False  # Has aggregation
+        return len(select) > 0  # Has at least one column
+    
+    def _create_distinct_summary_spec(self, query: Dict, query_num: int) -> Dict[str, Any]:
+        """Create a DISTINCT summary table specification for non-aggregated queries"""
+        select = query.get("select", [])
+        where = query.get("where", [])
+        
+        # Extract column names from select
+        distinct_columns = [col for col in select if isinstance(col, str)]
+        
+        if not distinct_columns:
+            return None
+        
+        # Analyze filters - pre-apply equality filters, add filter columns for non-equality
+        constant_filters = []
+        filter_columns = []
+        
+        for cond in where:
+            col = cond.get("col")
+            op = cond.get("op")
+            val = cond.get("val")
+            
+            if op == "eq":
+                # Pre-apply equality filters
+                constant_filters.append({
+                    "column": col,
+                    "operator": op,
+                    "value": val
+                })
+            else:
+                # For non-equality filters, add the column to DISTINCT so we can filter at query time
+                if col not in distinct_columns and col not in filter_columns:
+                    filter_columns.append(col)
+        
+        # Combine distinct columns with filter columns
+        all_columns = distinct_columns + filter_columns
+        
+        # Generate table name
+        table_name = f"summary_q{query_num}_distinct_{'_'.join(sorted(distinct_columns))}"
+        
+        return {
+            "table_name": table_name,
+            "query_num": query_num,
+            "type": "distinct",
+            "distinct_columns": all_columns,  # Include filter columns in DISTINCT
+            "select_columns": distinct_columns,  # Original SELECT columns
+            "filter_columns": filter_columns,  # Columns added for filtering
+            "constant_filters": constant_filters,
+            "original_query": query
+        }
+    
     def _generate_table_name(self, group_by: List[str], filters: List[Dict], query_num: int) -> str:
         """Generate unique table name based on query structure"""
         # Simple naming: summary_q{num}_{groupby_cols}
@@ -136,6 +197,10 @@ def generate_summary_table_sql(spec: Dict[str, Any]) -> str:
     """
     Generate SQL to create a summary table from a specification
     """
+    # Handle DISTINCT summary tables differently
+    if spec.get("type") == "distinct":
+        return generate_distinct_summary_sql(spec)
+    
     table_name = spec["table_name"]
     summary_group_by = spec["summary_group_by"]  # Use expanded GROUP BY
     aggregations = spec["aggregations"]
@@ -185,6 +250,38 @@ def generate_summary_table_sql(spec: Dict[str, Any]) -> str:
     return sql.strip()
 
 
+def generate_distinct_summary_sql(spec: Dict[str, Any]) -> str:
+    """
+    Generate SQL to create a DISTINCT summary table
+    """
+    table_name = spec["table_name"]
+    distinct_columns = spec["distinct_columns"]
+    constant_filters = spec["constant_filters"]
+    
+    # Build SELECT DISTINCT clause
+    select_clause = ", ".join(distinct_columns)
+    
+    # Build WHERE clause
+    where_clause = ""
+    if constant_filters:
+        conditions = []
+        for f in constant_filters:
+            col = f["column"]
+            val = f["value"]
+            conditions.append(f"{col} = '{val}'")
+        where_clause = "WHERE " + " AND ".join(conditions)
+    
+    sql = f"""
+        CREATE OR REPLACE TABLE {table_name} AS
+        SELECT DISTINCT
+            {select_clause}
+        FROM events
+        {where_clause}
+    """
+    
+    return sql.strip()
+
+
 class AdaptiveQueryRouter:
     """
     Routes queries to dynamically created summary tables
@@ -229,6 +326,7 @@ class AdaptiveQueryRouter:
         """
         query_group_by = set(query.get("group_by", []))
         query_where = query.get("where", [])
+        query_select = query.get("select", [])
         
         # Extract all filter columns and equality filters from query
         query_filter_cols = set()
@@ -241,8 +339,35 @@ class AdaptiveQueryRouter:
         
         # Find matching summary table
         for spec in self.summary_specs:
-            spec_query_group_by = set(spec["query_group_by"])
-            spec_summary_group_by = set(spec["summary_group_by"])
+            # Handle DISTINCT summary tables
+            if spec.get("type") == "distinct":
+                # Check if query is a simple SELECT (no aggregations)
+                has_aggregation = any(isinstance(item, dict) for item in query_select)
+                if has_aggregation or query_group_by:
+                    continue  # This is an aggregation query, skip DISTINCT summaries
+                
+                # Check if selected columns match
+                query_cols = set(col for col in query_select if isinstance(col, str))
+                spec_select_cols = set(spec.get("select_columns", spec["distinct_columns"]))
+                if query_cols != spec_select_cols:
+                    continue
+                
+                # Check if summary's constant filters are satisfied
+                spec_const_filters = {f["column"]: f["value"] for f in spec["constant_filters"]}
+                if not all(query_const_filters.get(col) == val for col, val in spec_const_filters.items()):
+                    continue
+                
+                # Check if all query filter columns exist in summary
+                spec_all_cols = set(spec["distinct_columns"])
+                if not query_filter_cols.issubset(spec_all_cols | set(spec_const_filters.keys())):
+                    continue
+                
+                # Match found!
+                return spec
+            
+            # Handle regular GROUP BY summary tables
+            spec_query_group_by = set(spec.get("query_group_by", []))
+            spec_summary_group_by = set(spec.get("summary_group_by", []))
             
             # Query's GROUP BY must match the original query GROUP BY this summary was built for
             if query_group_by != spec_query_group_by:
@@ -274,6 +399,10 @@ class AdaptiveQueryRouter:
         1. Filter on those dimensions
         2. Re-aggregate to get final result
         """
+        # Handle DISTINCT summary tables
+        if spec.get("type") == "distinct":
+            return self._rewrite_for_distinct_summary(query, spec)
+        
         table_name = spec["table_name"]
         aggregations = spec["aggregations"]
         spec_const_filters = {f["column"]: f["value"] for f in spec["constant_filters"]}
@@ -383,6 +512,62 @@ class AdaptiveQueryRouter:
                 {where_clause}
                 {order_by_clause}
             """
+        
+        return sql.strip()
+    
+    def _rewrite_for_distinct_summary(self, query: Dict[str, Any], spec: Dict[str, Any]) -> str:
+        """
+        Rewrite query to use a DISTINCT summary table
+        """
+        table_name = spec["table_name"]
+        # Use select_columns (original SELECT) not distinct_columns (which may include filter columns)
+        select_columns = spec.get("select_columns", spec["distinct_columns"])
+        spec_const_filters = {f["column"]: f["value"] for f in spec["constant_filters"]}
+        
+        # Build SELECT clause
+        select_clause = ", ".join(select_columns)
+        
+        # Build WHERE clause (only for filters NOT pre-applied in summary table)
+        where_parts = []
+        for cond in query.get("where", []):
+            col = cond["col"]
+            op = cond["op"]
+            val = cond["val"]
+            
+            # Skip constant filters that were pre-applied
+            if op == "eq" and spec_const_filters.get(col) == val:
+                continue
+            
+            # Add remaining filters
+            if op == "eq":
+                where_parts.append(f"{col} = '{val}'")
+            elif op == "between":
+                where_parts.append(f"{col} BETWEEN '{val[0]}' AND '{val[1]}'")
+            elif op in ("lt", "lte", "gt", "gte"):
+                sym = {"lt": "<", "lte": "<=", "gt": ">", "gte": ">="}[op]
+                where_parts.append(f"{col} {sym} '{val}'")
+            elif op == "in":
+                vals = ", ".join(f"'{v}'" for v in val)
+                where_parts.append(f"{col} IN ({vals})")
+        
+        where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+        
+        # Build ORDER BY if specified
+        order_by_clause = ""
+        if order_by := query.get("order_by"):
+            order_parts = []
+            for o in order_by:
+                col = o["col"]
+                direction = o.get("dir", "asc").upper()
+                order_parts.append(f"{col} {direction}")
+            order_by_clause = " ORDER BY " + ", ".join(order_parts)
+        
+        sql = f"""
+            SELECT {select_clause}
+            FROM {table_name}
+            {where_clause}
+            {order_by_clause}
+        """
         
         return sql.strip()
     
